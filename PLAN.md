@@ -14,16 +14,10 @@ A personal map for marking places you **went** and places you **will go**, organ
 | Map | **MapLibre GL / react-map-gl** with free OpenStreetMap-based tiles (e.g. MapTiler free tier) | Free, no credit card. Google Maps JS needs billing set up |
 | Place search (geocoding) | **Nominatim** (OSM, free) at first; can switch to **Mapbox / Google Places** later if results are poor | Free; search quality for small shops can be weak, so the provider sits behind one module that is easy to swap |
 | Calendar UI | Own month grid built with `date-fns` | Full control over the dots and badges in each day cell |
-| Google Calendar | **Google Calendar API** (free, read-only scope) | No cost; quota is far beyond personal use |
+| Add by link | Paste a **Google Maps share link**; the server reads name + coordinates from the URL | Fastest way to add a place on a phone |
 | Data fetching | Server Components + Server Actions, `@supabase/ssr` | Little client state needed |
 | Drag to reorder | `@dnd-kit` | To reorder a day's places (1, 2, 3…) |
 | Hosting | **Vercel** | Already chosen |
-
-### Google Calendar (checked, see section 7)
-- Use the calendar's **secret iCal address** (a private `.ics` link), not OAuth. It is read-only and needs no Google Cloud project, no token refresh and no 7-day token expiry.
-- The link is kept in a Vercel env var `GCAL_ICS_URLS` (comma-separated for more than one calendar) and fetched **only on the server**.
-- A **⟳ Refresh** button fetches the feed again, and the result is cached in Supabase.
-- Each event's `LOCATION` text is turned into map coordinates with Nominatim, then the app shows it as a "suggested place".
 
 ---
 
@@ -42,20 +36,19 @@ A personal map for marking places you **went** and places you **will go**, organ
 ┌──────────────────────────────────────────────────────────┐
 │ NAV                                                       │
 ├──────────────────────────────────────────────────────────┤
-│   ◀  November 2026  ▶                [Today] [G-Cal: ON]  │
+│   ◀  November 2026  ▶                          [Today]   │
 │  Sun   Mon   Tue   Wed   Thu   Fri   Sat                  │
 │ ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┐               │
 │ │  1  │  2  │  3  │  4  │  5  │  6  │  7  │               │
 │ │     │ ●●  │     │ ○   │     │     │     │  ● went       │
-│ │     │     │     │📅Mtg│     │     │     │  ○ will go    │
-│ ├─────┼─────┼─────┼─────┼─────┼─────┼─────┤  📅 Google    │
-│ │ ... │     │     │     │     │     │     │     event     │
+│ │     │     │     │     │     │     │     │  ○ will go    │
+│ ├─────┼─────┼─────┼─────┼─────┼─────┼─────┤               │
+│ │ ... │     │     │     │     │     │     │               │
 │ └─────┴─────┴─────┴─────┴─────┴─────┴─────┘               │
 └──────────────────────────────────────────────────────────┘
 ```
 - Month grid. Each day shows:
   - dots or a count of saved places (filled = went, outline = will go)
-  - Google Calendar event titles (shortened), when connected
 - **Click a day → go to `/map?date=2026-11-02`**
 - On mobile, the grid shrinks to dots only and the events become a list under the grid.
 
@@ -79,7 +72,6 @@ A personal map for marking places you **went** and places you **will go**, organ
 - Places appear as **numbered markers 1, 2, 3…** in visit order, joined by a line to show the route.
 - Side panel (a bottom sheet on mobile) lists the day's places. You can drag to reorder, and clicking a row focuses its marker.
 - Clicking a marker opens a popup with the nickname, time, people and memo, plus Edit and Delete.
-- If the day has Google events that have a location, show them as "Add to map?" suggestions.
 
 ### 2.3 Add / edit place — `/add` (also opens as a dialog from the map)
 Fields:
@@ -101,7 +93,7 @@ Fields:
 ### 2.4 Later screens (phase 2+)
 - `/places` — list or search of every place, with filters (person, category, status)
 - "All-time map" — every place you ever went, as a heat map or clusters
-- Settings — connect or disconnect Google Calendar, choose the week's first day
+- Settings — language, first day of the week
 
 ---
 
@@ -126,7 +118,7 @@ create table places (
   memo          text,
   rating        smallint check (rating between 1 and 5),
   cost          numeric,
-  google_event_id text,                   -- if imported from Google Calendar
+  source_url    text,                     -- Google Maps link it came from
   created_at    timestamptz default now(),
   updated_at    timestamptz default now()
 );
@@ -145,21 +137,8 @@ create table place_people (
   primary key (place_id, person_id)
 );
 
--- cached Google Calendar events (filled by the Refresh button)
-create table gcal_events (
-  uid         text not null,              -- iCal UID (+ recurrence date)
-  user_id     uuid not null references auth.users on delete cascade,
-  title       text,
-  location    text,                       -- free text from Google
-  starts_at   timestamptz not null,
-  ends_at     timestamptz,
-  all_day     boolean default false,
-  fetched_at  timestamptz default now(),
-  primary key (user_id, uid)
-);
 ```
 - **Row Level Security** on every table: `user_id = auth.uid()`.
-- The secret iCal URL is **not** stored in the database. It lives only in the Vercel env var.
 
 ---
 
@@ -173,14 +152,14 @@ app/
   add/page.tsx          # add place
   login/page.tsx
   auth/callback/route.ts  # Supabase auth callback
-  api/gcal/refresh/route.ts  # download .ics, cache events (server)
+  api/parse-link/route.ts  # Google Maps link -> name, lat, lng, address
 components/
   NavBar.tsx  MonthCalendar.tsx  DayCell.tsx
   DateBar.tsx  PlaceMap.tsx  PlaceList.tsx  PlaceForm.tsx  PlaceSearch.tsx
 lib/
   supabase/{client,server}.ts
   geocode.ts            # Nominatim now; swap provider later
-  gcal.ts               # fetch + parse .ics (node-ical)
+  mapsLink.ts           # URL parsing rules (unit-tested)
 supabase/migrations/    # SQL above
 ```
 
@@ -189,12 +168,12 @@ supabase/migrations/    # SQL above
 ## 5. Build order
 
 1. **Setup:** Next.js, Tailwind, shadcn, Supabase project, SQL migration, Vercel deploy of an empty app.
-2. **Auth:** Google login through Supabase (only the basic scope at first).
+2. **Auth:** email magic-link login through Supabase (just me).
 3. **Nav bar + calendar page:** month grid that reads place counts from Supabase.
 4. **Map page:** date bar, MapLibre map, numbered markers and route line.
 5. **Add / edit place:** search, map pin, all fields, people tags.
 6. **Reorder** by drag and drop, plus delete.
-7. **Google Calendar:** iCal feed, refresh button, 📅 in calendar cells, "Add to map?" suggestions.
+7. **Add by Google Maps link** (+ Android share-to-app).
 8. **Polish:** mobile layout, empty states, loading states.
 9. *(Phase 2)* photos, all-places list and filters, all-time map.
 
@@ -204,22 +183,21 @@ supabase/migrations/    # SQL above
 - **Users:** just me for now. Login still uses Supabase Auth with RLS, so more users can be added later.
 - **Language:** English first, with Korean support through `next-intl` (`en`, `ko`).
 - **Map:** OpenStreetMap through MapLibre, with Nominatim for search.
-- **Google Calendar:** read-only, with a manual refresh button.
+- **Google Calendar:** dropped.
 - **Device:** phone first. Bottom sheet instead of a side panel, large tap targets, and a compact nav bar.
 
-## 7. Google Calendar check
-| Question | Answer |
-|---|---|
-| Free? | Yes. Normal use of the Calendar API and of the iCal feed costs nothing. Google's usage-limits page says charges for going **over** quota are planned. One person's refreshes stay far below the quota. |
-| Location data? | **Yes, as free text only.** Each event has an optional `location` field (`LOCATION` in .ics) containing whatever was typed or picked, e.g. `"Blue Bottle Seongsu, 7 Achasan-ro, Seongdong-gu, Seoul"`. There is **no latitude/longitude**, so the app has to geocode the text. |
-| Events without a location | Shown in the calendar cell, but no map suggestion. |
-| Geocoding can fail | When the text is vague (e.g. "mom's house"), the user picks the right result or drops a pin. The confirmed coordinates are saved, so it is asked only once. |
-| Recurring events | The .ics has repeat rules; `node-ical` expands them into dates. |
-| Risk | The secret link works like a password. It lives only in a server env var, and if it leaks you press "Reset" in Google Calendar settings. |
-| Fallback | If the iCal feed is too slow to update or blocked (e.g. by a work account's admin), switch to OAuth with the `calendar.readonly` scope. The app would then need to be published to "In production" to avoid the 7-day token expiry. |
+## 7. Add a place from a Google Maps link
+Paste a link into the Add form. The server parses it and pre-fills the form, and you confirm.
 
-### Import flow
-1. Press ⟳ on the calendar. The server downloads the .ics and saves new or changed events in a `gcal_events` cache table.
-2. Days with events show 📅 in the calendar.
-3. On the map page for that day, events with a location appear as **"Add to map?"** cards.
-4. Tap a card. The app geocodes the location text and pre-fills the place form (name, time, memo = event title). Confirm, and the place is saved with `google_event_id`, so it is never suggested twice.
+| Link type | Example | What we get |
+|---|---|---|
+| Full place URL | `google.com/maps/place/Blue+Bottle/@37.54,127.05,17z/data=...!3d37.5446!4d127.0581` | **Name** from `/place/<name>`. **Exact pin** from `!3d<lat>!4d<lng>`. `@lat,lng` is only the map's center, so it is a fallback. |
+| Short share link (phone) | `maps.app.goo.gl/AbC123` | The server follows the redirect to get the full URL, then parses it as above. |
+| Search-style URL | `google.com/maps?q=Blue+Bottle+Seongsu` or `?q=37.54,127.05` | Coordinates if they are in `q`. Otherwise the name is searched with Nominatim. |
+| Pasted share text | `Blue Bottle Seongsu\nhttps://maps.app.goo.gl/...` | The text before the link is used as a name hint. |
+
+- **Address:** a Google link has no address in it, so we get one by **reverse-geocoding** the coordinates with Nominatim. It is free, but the OSM address wording can differ a little from Google's.
+- **Altitude** is not in the links. We get **latitude and longitude**.
+- **If parsing fails:** fall back to the search box and a map pin. You can always drag the pin to fix it.
+- We only read the **URL** and never scrape Google's page content.
+- **Phone shortcut:** as an installed PWA on **Android**, the app can appear in Google Maps' "Share" menu (Web Share Target), which opens the Add form pre-filled. **iOS** doesn't allow this for web apps, so on iPhone it is copy then paste. The form auto-reads the clipboard when you tap "Paste link".
