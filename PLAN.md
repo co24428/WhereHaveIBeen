@@ -19,11 +19,11 @@ A personal map for marking places you **went** and places you **will go**, organ
 | Drag to reorder | `@dnd-kit` | To reorder a day's places (1, 2, 3…) |
 | Hosting | **Vercel** | Already chosen |
 
-### About Google Calendar being free
-- The API is **free**. You need a Google Cloud project with an OAuth client.
-- Log in with Google through Supabase Auth and request the extra scope `calendar.readonly`.
-- **Catch:** Supabase gives the Google token at login but does **not** refresh it. We save the Google `refresh_token` in our own table and refresh it on the server.
-- **Catch 2:** while the Google OAuth app is in "Testing" mode, refresh tokens **expire after 7 days**. For personal use, switch the app to "In production" (unverified). You will see a "Google hasn't verified this app" warning once at login. That is fine for up to 100 users with no review.
+### Google Calendar (checked, see section 7)
+- Use the calendar's **secret iCal address** (a private `.ics` link), not OAuth. It is read-only and needs no Google Cloud project, no token refresh and no 7-day token expiry.
+- The link is kept in a Vercel env var `GCAL_ICS_URLS` (comma-separated for more than one calendar) and fetched **only on the server**.
+- A **⟳ Refresh** button fetches the feed again, and the result is cached in Supabase.
+- Each event's `LOCATION` text is turned into map coordinates with Nominatim, then the app shows it as a "suggested place".
 
 ---
 
@@ -145,15 +145,21 @@ create table place_people (
   primary key (place_id, person_id)
 );
 
--- Google refresh token, server-side only
-create table google_tokens (
-  user_id       uuid primary key references auth.users on delete cascade,
-  refresh_token text not null,
-  updated_at    timestamptz default now()
+-- cached Google Calendar events (filled by the Refresh button)
+create table gcal_events (
+  uid         text not null,              -- iCal UID (+ recurrence date)
+  user_id     uuid not null references auth.users on delete cascade,
+  title       text,
+  location    text,                       -- free text from Google
+  starts_at   timestamptz not null,
+  ends_at     timestamptz,
+  all_day     boolean default false,
+  fetched_at  timestamptz default now(),
+  primary key (user_id, uid)
 );
 ```
 - **Row Level Security** on every table: `user_id = auth.uid()`.
-- `google_tokens` has no client policies and is read only with the service-role key on the server.
+- The secret iCal URL is **not** stored in the database. It lives only in the Vercel env var.
 
 ---
 
@@ -166,15 +172,15 @@ app/
   map/page.tsx          # map + sticky date bar
   add/page.tsx          # add place
   login/page.tsx
-  auth/callback/route.ts  # Supabase OAuth callback, saves Google refresh token
-  api/gcal/route.ts     # fetch Google events for a month (server)
+  auth/callback/route.ts  # Supabase auth callback
+  api/gcal/refresh/route.ts  # download .ics, cache events (server)
 components/
   NavBar.tsx  MonthCalendar.tsx  DayCell.tsx
   DateBar.tsx  PlaceMap.tsx  PlaceList.tsx  PlaceForm.tsx  PlaceSearch.tsx
 lib/
   supabase/{client,server}.ts
   geocode.ts            # Nominatim now; swap provider later
-  gcal.ts               # token refresh + events.list
+  gcal.ts               # fetch + parse .ics (node-ical)
 supabase/migrations/    # SQL above
 ```
 
@@ -188,15 +194,32 @@ supabase/migrations/    # SQL above
 4. **Map page:** date bar, MapLibre map, numbered markers and route line.
 5. **Add / edit place:** search, map pin, all fields, people tags.
 6. **Reorder** by drag and drop, plus delete.
-7. **Google Calendar:** extra scope, saving the refresh token, events in calendar cells, "add event's location to map".
+7. **Google Calendar:** iCal feed, refresh button, 📅 in calendar cells, "Add to map?" suggestions.
 8. **Polish:** mobile layout, empty states, loading states.
 9. *(Phase 2)* photos, all-places list and filters, all-time map.
 
 ---
 
-## 6. Questions for you
-1. **Just you, or other people too?** This plan assumes multiple users are possible (each sees only their own data), which costs almost nothing extra.
-2. **Language of the UI:** English, Korean, or both?
-3. **Map provider:** is the free OpenStreetMap map OK, or do you want Google Maps? Google Maps has better place search in Korea and Asia, but it needs a billing account. There is a free monthly credit.
-4. **Google Calendar:** only *read* events, or also *write* planned places back to Google Calendar as events?
-5. Mainly used on **phone or desktop**?
+## 6. Decisions
+- **Users:** just me for now. Login still uses Supabase Auth with RLS, so more users can be added later.
+- **Language:** English first, with Korean support through `next-intl` (`en`, `ko`).
+- **Map:** OpenStreetMap through MapLibre, with Nominatim for search.
+- **Google Calendar:** read-only, with a manual refresh button.
+- **Device:** phone first. Bottom sheet instead of a side panel, large tap targets, and a compact nav bar.
+
+## 7. Google Calendar check
+| Question | Answer |
+|---|---|
+| Free? | Yes. Normal use of the Calendar API and of the iCal feed costs nothing. Google's usage-limits page says charges for going **over** quota are planned. One person's refreshes stay far below the quota. |
+| Location data? | **Yes, as free text only.** Each event has an optional `location` field (`LOCATION` in .ics) containing whatever was typed or picked, e.g. `"Blue Bottle Seongsu, 7 Achasan-ro, Seongdong-gu, Seoul"`. There is **no latitude/longitude**, so the app has to geocode the text. |
+| Events without a location | Shown in the calendar cell, but no map suggestion. |
+| Geocoding can fail | When the text is vague (e.g. "mom's house"), the user picks the right result or drops a pin. The confirmed coordinates are saved, so it is asked only once. |
+| Recurring events | The .ics has repeat rules; `node-ical` expands them into dates. |
+| Risk | The secret link works like a password. It lives only in a server env var, and if it leaks you press "Reset" in Google Calendar settings. |
+| Fallback | If the iCal feed is too slow to update or blocked (e.g. by a work account's admin), switch to OAuth with the `calendar.readonly` scope. The app would then need to be published to "In production" to avoid the 7-day token expiry. |
+
+### Import flow
+1. Press ⟳ on the calendar. The server downloads the .ics and saves new or changed events in a `gcal_events` cache table.
+2. Days with events show 📅 in the calendar.
+3. On the map page for that day, events with a location appear as **"Add to map?"** cards.
+4. Tap a card. The app geocodes the location text and pre-fills the place form (name, time, memo = event title). Confirm, and the place is saved with `google_event_id`, so it is never suggested twice.
