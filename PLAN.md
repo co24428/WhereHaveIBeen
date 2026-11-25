@@ -142,7 +142,7 @@ create table place_people (
 ```
 - **Row Level Security** on every table: `user_id = auth.uid()`.
 
-- The real schema is in `supabase/migrations/0001_init.sql`.
+- The real schema is in `supabase/migrations/0001_init.sql`. All tables live in the Postgres schema **`wherehaveibeen`** (not `public`), so the app can share an existing Supabase project. That schema must be added to *Data API → Exposed schemas*.
 
 ---
 

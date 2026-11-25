@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { CATEGORIES } from "@/lib/types";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { createClient } from "@/lib/supabase/server";
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 const time = z
   .string()

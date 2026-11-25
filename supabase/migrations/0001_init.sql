@@ -1,7 +1,17 @@
 -- WhereHaveIBeen: initial schema
--- Run in Supabase → SQL Editor (or `supabase db push`).
+--
+-- Everything lives in its own schema "wherehaveibeen", so it can share a
+-- Supabase project with other apps without touching their tables.
+--
+-- Run in Supabase → SQL Editor. Then add "wherehaveibeen" to
+-- Project Settings → Data API → Exposed schemas (see README).
 
-create table if not exists public.places (
+create schema if not exists wherehaveibeen;
+
+-- API roles need access to the schema (RLS below still limits rows)
+grant usage on schema wherehaveibeen to authenticated, service_role;
+
+create table if not exists wherehaveibeen.places (
   id              uuid primary key default gen_random_uuid(),
   user_id         uuid not null default auth.uid() references auth.users on delete cascade,
   visit_date      date not null,
@@ -24,52 +34,65 @@ create table if not exists public.places (
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
-create index if not exists places_user_date_order on public.places (user_id, visit_date, visit_order);
+create index if not exists places_user_date_order on wherehaveibeen.places (user_id, visit_date, visit_order);
 
-create table if not exists public.people (
+create table if not exists wherehaveibeen.people (
   id       uuid primary key default gen_random_uuid(),
   user_id  uuid not null default auth.uid() references auth.users on delete cascade,
   name     text not null,
   unique (user_id, name)
 );
 
-create table if not exists public.place_people (
-  place_id  uuid not null references public.places on delete cascade,
-  person_id uuid not null references public.people on delete cascade,
+create table if not exists wherehaveibeen.place_people (
+  place_id  uuid not null references wherehaveibeen.places on delete cascade,
+  person_id uuid not null references wherehaveibeen.people on delete cascade,
   primary key (place_id, person_id)
 );
+create index if not exists place_people_person on wherehaveibeen.place_people (person_id);
 
 -- keep updated_at fresh
-create or replace function public.touch_updated_at() returns trigger
+create or replace function wherehaveibeen.touch_updated_at() returns trigger
 language plpgsql set search_path = '' as $$
 begin
   new.updated_at = now();
   return new;
 end $$;
 
-drop trigger if exists places_touch on public.places;
-create trigger places_touch before update on public.places
-  for each row execute function public.touch_updated_at();
+drop trigger if exists places_touch on wherehaveibeen.places;
+create trigger places_touch before update on wherehaveibeen.places
+  for each row execute function wherehaveibeen.touch_updated_at();
+
+-- table privileges for logged-in users (rows are filtered by RLS)
+grant select, insert, update, delete on all tables in schema wherehaveibeen to authenticated;
+grant all on all tables in schema wherehaveibeen to service_role;
+alter default privileges in schema wherehaveibeen grant select, insert, update, delete on tables to authenticated;
+alter default privileges in schema wherehaveibeen grant all on tables to service_role;
 
 -- Row Level Security: every user sees only their own rows
-alter table public.places       enable row level security;
-alter table public.people       enable row level security;
-alter table public.place_people enable row level security;
+alter table wherehaveibeen.places       enable row level security;
+alter table wherehaveibeen.people       enable row level security;
+alter table wherehaveibeen.place_people enable row level security;
 
-create policy "own places" on public.places
+drop policy if exists "own places" on wherehaveibeen.places;
+create policy "own places" on wherehaveibeen.places
   for all to authenticated
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
 
-create policy "own people" on public.people
+drop policy if exists "own people" on wherehaveibeen.people;
+create policy "own people" on wherehaveibeen.people
   for all to authenticated
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
 
-create policy "own place_people" on public.place_people
+drop policy if exists "own place_people" on wherehaveibeen.place_people;
+create policy "own place_people" on wherehaveibeen.place_people
   for all to authenticated
-  using (exists (select 1 from public.places p where p.id = place_id and p.user_id = (select auth.uid())))
+  using (exists (select 1 from wherehaveibeen.places p where p.id = place_id and p.user_id = (select auth.uid())))
   with check (
-    exists (select 1 from public.places p where p.id = place_id and p.user_id = (select auth.uid()))
-    and exists (select 1 from public.people pe where pe.id = person_id and pe.user_id = (select auth.uid()))
+    exists (select 1 from wherehaveibeen.places p where p.id = place_id and p.user_id = (select auth.uid()))
+    and exists (select 1 from wherehaveibeen.people pe where pe.id = person_id and pe.user_id = (select auth.uid()))
   );
+
+-- make the API notice the new schema/tables right away
+notify pgrst, 'reload schema';

@@ -1,5 +1,7 @@
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { createClient } from "@/lib/supabase/server";
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 const SEOUL = { lat: 37.5665, lng: 126.978 };
 

@@ -14,20 +14,22 @@ Stack: Next.js 16 · Tailwind · Supabase (Postgres, Auth, RLS) · MapLibre + Op
 
 ## Setup
 
-### 1. Supabase
-1. Create a project at <https://supabase.com>.
-2. **SQL Editor** → paste and run [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql).
-3. **Authentication → URL Configuration**:
-   - Site URL: your Vercel URL, e.g. `https://where-have-i-been.vercel.app`
-   - Redirect URLs: add `https://<your-vercel-url>/auth/callback` and `http://localhost:3000/auth/callback`
-4. **Authentication → Emails → Magic Link** template: add the code so you can log in on a phone even when the email opens in a different browser:
+### 1. Supabase (use your existing project)
+All tables live in their own schema, **`wherehaveibeen`**, so this app can share a Supabase project with another app without touching that app's tables.
+
+1. Open your existing project → **SQL Editor** → paste and run [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql). It creates the schema `wherehaveibeen` with the tables `places`, `people` and `place_people`, plus row-level security. Running it again is safe.
+2. **Project Settings → Data API → Exposed schemas**: add **`wherehaveibeen`** next to `public`, then save. Without this, the app gets the error *"The schema must be one of the following: public…"*.
+3. **Authentication → URL Configuration → Redirect URLs**: **add** `https://<your-vercel-url>/auth/callback` and `http://localhost:3000/auth/callback`. Leave the **Site URL** as it is, because it belongs to your other app.
+4. **Authentication → Emails → Magic Link** template: add the code line. Other apps in this project will show the code too, which is harmless.
    ```html
-   <h2>Log in to WhereHaveIBeen</h2>
-   <p><a href="{{ .ConfirmationURL }}">Log in</a></p>
    <p>Or enter this code: <strong>{{ .Token }}</strong></p>
    ```
-5. Log in once with your email. Then go to **Authentication → Sign In / Providers** and turn off **Allow new users to sign up**, so nobody else can create an account.
-6. **Project Settings → API**: copy the **Project URL** and the **publishable** key (or the legacy *anon* key).
+5. **Project Settings → API**: copy the **Project URL** and the **publishable** key (or the legacy *anon* key).
+
+> **Shared project, shared users.** Accounts (`auth.users`) are shared with the other app. That's fine because:
+> - Every row is tied to its owner's `user_id` by row-level security, so other users can never see your places.
+> - Set `ALLOWED_EMAILS` to your email so only you can log in here.
+> - **Don't** turn off "Allow new users to sign up". That setting is for the whole project and would affect the other app.
 
 ### 2. Kakao Local API
 1. <https://developers.kakao.com> → **내 애플리케이션 → 애플리케이션 추가하기**.
