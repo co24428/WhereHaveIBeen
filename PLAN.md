@@ -192,10 +192,12 @@ Paste a link into the Add form. The server parses it and pre-fills the form, and
 | Link type | Example | What we get |
 |---|---|---|
 | Full place URL | `google.com/maps/place/Blue+Bottle/@37.54,127.05,17z/data=...!3d37.5446!4d127.0581` | **Name** from `/place/<name>`. **Exact pin** from `!3d<lat>!4d<lng>`. `@lat,lng` is only the map's center, so it is a fallback. |
+| Place URL with no coordinates (real sample) | `google.com/maps/place/인덕원비빔국수+안양본점/data=!4m4!3m3!1s0x357b…:0x4759…!16s/g/1tdy2d4b!20s8Q98CX2H+2P3` | **Name** from `/place/`. **Plus Code** from `!20s…` (`8Q98CX2H+2P3`), decoded offline with `open-location-code` to **37.40001, 126.97930** (exact pin, about 3 m). `!1s0x…:0x…` is Google's place ID, which can't be turned into coordinates without Google's paid API. |
 | Short share link (phone) | `maps.app.goo.gl/AbC123` | The server follows the redirect to get the full URL, then parses it as above. |
 | Search-style URL | `google.com/maps?q=Blue+Bottle+Seongsu` or `?q=37.54,127.05` | Coordinates if they are in `q`. Otherwise the name is searched with Nominatim. |
 | Pasted share text | `Blue Bottle Seongsu\nhttps://maps.app.goo.gl/...` | The text before the link is used as a name hint. |
 
+- **Order the app tries:** `!3d!4d`, then the `!20s` Plus Code, then `?q=` coordinates, then `@lat,lng`, then a name search on Nominatim.
 - **Address:** a Google link has no address in it, so we get one by **reverse-geocoding** the coordinates with Nominatim. It is free, but the OSM address wording can differ a little from Google's.
 - **Altitude** is not in the links. We get **latitude and longitude**.
 - **If parsing fails:** fall back to the search box and a map pin. You can always drag the pin to fix it.
