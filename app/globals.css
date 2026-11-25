@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+:root {
+  --nav-h: 3.5rem;
+  --datebar-h: 3rem;
+}
+
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+/* numbered map markers */
+.pin {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  border: 2px solid white;
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+  cursor: pointer;
+  transition: transform 120ms;
+}
+.pin.planned {
+  background: white !important;
+  border: 3px solid currentColor;
+}
+.pin.selected {
+  transform: scale(1.25);
+  z-index: 10;
+}
+.maplibregl-popup-content {
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
+}

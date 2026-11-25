@@ -8,13 +8,13 @@ A personal map for marking places you **went** and places you **will go**, organ
 
 | Layer | Choice | Why |
 |---|---|---|
-| Framework | **Next.js 15 (App Router) + TypeScript** | Deploys to Vercel with no setup; server and client code in one repo |
-| Styling | **Tailwind CSS + shadcn/ui** | Fast to build, ready-made accessible components (dialog, calendar, popover) |
-| Database / Auth | **Supabase** (Postgres + Auth + Row Level Security) | Already chosen; Google sign-in is built in |
-| Map | **MapLibre GL / react-map-gl** with free OpenStreetMap-based tiles (e.g. MapTiler free tier) | Free, no credit card. Google Maps JS needs billing set up |
+| Framework | **Next.js 16 (App Router) + TypeScript** | Deploys to Vercel with no setup; server and client code in one repo |
+| Styling | **Tailwind CSS** (hand-built components; shadcn/ui wasn't needed) | Fast to build, small bundle |
+| Database / Auth | **Supabase** (Postgres + Auth + Row Level Security), email link + code login | Already chosen |
+| Map | **MapLibre GL / react-map-gl** with free OpenStreetMap tiles from **OpenFreeMap** (no key) | Free, no credit card. Google Maps JS needs billing set up |
 | Place search / address → coordinates | **Kakao Local API** (keyword search, address search, coord→address), called only from the server | Free with a REST key; best data for Korean shops and 도로명/지번 addresses |
 | Calendar UI | Own month grid built with `date-fns` | Full control over the dots and badges in each day cell |
-| Add by link | Paste a **Google Maps share link**; the server reads name + coordinates from the URL | Fastest way to add a place on a phone |
+| Add by link | Paste a **Google / Kakao / Naver link or share text**; the server reads name + coordinates | Fastest way to add a place on a phone |
 | Data fetching | Server Components + Server Actions, `@supabase/ssr` | Little client state needed |
 | Drag to reorder | `@dnd-kit` | To reorder a day's places (1, 2, 3…) |
 | Hosting | **Vercel** | Already chosen |
@@ -109,7 +109,8 @@ create table places (
   status        text not null check (status in ('visited','planned')),
   nickname      text,
   name          text not null,            -- official place name from search
-  address       text,
+  address       text,                     -- 도로명
+  jibun_address text,                     -- 지번
   lat           double precision not null,
   lng           double precision not null,
   start_time    time,
@@ -118,7 +119,8 @@ create table places (
   memo          text,
   rating        smallint check (rating between 1 and 5),
   cost          numeric,
-  source_url    text,                     -- Google Maps link it came from
+  source_url    text,                     -- map link it came from
+  kakao_place_id text,
   created_at    timestamptz default now(),
   updated_at    timestamptz default now()
 );
@@ -140,27 +142,35 @@ create table place_people (
 ```
 - **Row Level Security** on every table: `user_id = auth.uid()`.
 
+- The real schema is in `supabase/migrations/0001_init.sql`.
+
 ---
 
 ## 4. Project structure
 
 ```
 app/
-  layout.tsx            # nav bar
-  page.tsx              # calendar (main)
-  map/page.tsx          # map + sticky date bar
-  add/page.tsx          # add place
-  login/page.tsx
-  auth/callback/route.ts  # Supabase auth callback
-  api/parse-link/route.ts  # Google Maps link -> name, lat, lng, address
+  layout.tsx                 # nav bar, i18n provider
+  page.tsx                   # calendar (main)
+  map/page.tsx               # map + sticky date bar
+  add/page.tsx               # add place (also the Android share target)
+  places/[id]/edit/page.tsx  # edit place
+  login/                     # email link + code login
+  auth/callback/route.ts     # Supabase magic-link callback
+  api/resolve/route.ts       # pasted text -> place candidates
+  api/search/route.ts        # Kakao keyword + address search
+  api/reverse/route.ts       # pin -> address
+  actions/places.ts          # save / delete / reorder
+  manifest.ts                # PWA + share_target
 components/
-  NavBar.tsx  MonthCalendar.tsx  DayCell.tsx
-  DateBar.tsx  PlaceMap.tsx  PlaceList.tsx  PlaceForm.tsx  PlaceSearch.tsx
+  NavBar  DateBar  DayView  PlaceMap  PlaceDetails  PlaceForm  PinMap  PeopleInput
 lib/
-  supabase/{client,server}.ts
-  kakao.ts              # Kakao Local API: search, address→coords, coords→address
-  mapsLink.ts           # URL parsing rules (unit-tested)
-supabase/migrations/    # SQL above
+  parse/{links,shareText,plusCode}.ts   # pure parsing rules (unit-tested)
+  resolve.ts            # follow short links, call Kakao, rank candidates
+  kakao.ts              # Kakao Local API
+  supabase/{server,proxy}.ts
+messages/{en,ko}.json
+supabase/migrations/0001_init.sql
 ```
 
 ---
