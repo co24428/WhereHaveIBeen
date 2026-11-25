@@ -12,7 +12,7 @@ A personal map for marking places you **went** and places you **will go**, organ
 | Styling | **Tailwind CSS + shadcn/ui** | Fast to build, ready-made accessible components (dialog, calendar, popover) |
 | Database / Auth | **Supabase** (Postgres + Auth + Row Level Security) | Already chosen; Google sign-in is built in |
 | Map | **MapLibre GL / react-map-gl** with free OpenStreetMap-based tiles (e.g. MapTiler free tier) | Free, no credit card. Google Maps JS needs billing set up |
-| Place search (geocoding) | **Nominatim** (OSM, free) at first; can switch to **Mapbox / Google Places** later if results are poor | Free; search quality for small shops can be weak, so the provider sits behind one module that is easy to swap |
+| Place search / address → coordinates | **Kakao Local API** (keyword search, address search, coord→address), called only from the server | Free with a REST key; best data for Korean shops and 도로명/지번 addresses |
 | Calendar UI | Own month grid built with `date-fns` | Full control over the dots and badges in each day cell |
 | Add by link | Paste a **Google Maps share link**; the server reads name + coordinates from the URL | Fastest way to add a place on a phone |
 | Data fetching | Server Components + Server Actions, `@supabase/ssr` | Little client state needed |
@@ -158,7 +158,7 @@ components/
   DateBar.tsx  PlaceMap.tsx  PlaceList.tsx  PlaceForm.tsx  PlaceSearch.tsx
 lib/
   supabase/{client,server}.ts
-  geocode.ts            # Nominatim now; swap provider later
+  kakao.ts              # Kakao Local API: search, address→coords, coords→address
   mapsLink.ts           # URL parsing rules (unit-tested)
 supabase/migrations/    # SQL above
 ```
@@ -182,11 +182,11 @@ supabase/migrations/    # SQL above
 ## 6. Decisions
 - **Users:** just me for now. Login still uses Supabase Auth with RLS, so more users can be added later.
 - **Language:** English first, with Korean support through `next-intl` (`en`, `ko`).
-- **Map:** OpenStreetMap through MapLibre, with Nominatim for search.
+- **Map:** OpenStreetMap tiles through MapLibre for display, Kakao Local API for search and addresses.
 - **Google Calendar:** dropped.
 - **Device:** phone first. Bottom sheet instead of a side panel, large tap targets, and a compact nav bar.
 
-## 7. Add a place from a Google Maps link
+## 7. Add a place: paste a link, share text or address
 Paste a link into the Add form. The server parses it and pre-fills the form, and you confirm.
 
 | Link type | Example | What we get |
@@ -194,12 +194,23 @@ Paste a link into the Add form. The server parses it and pre-fills the form, and
 | Full place URL | `google.com/maps/place/Blue+Bottle/@37.54,127.05,17z/data=...!3d37.5446!4d127.0581` | **Name** from `/place/<name>`. **Exact pin** from `!3d<lat>!4d<lng>`. `@lat,lng` is only the map's center, so it is a fallback. |
 | Place URL with no coordinates (real sample) | `google.com/maps/place/인덕원비빔국수+안양본점/data=!4m4!3m3!1s0x357b…:0x4759…!16s/g/1tdy2d4b!20s8Q98CX2H+2P3` | **Name** from `/place/`. **Plus Code** from `!20s…` (`8Q98CX2H+2P3`), decoded offline with `open-location-code` to **37.40001, 126.97930** (exact pin, about 3 m). `!1s0x…:0x…` is Google's place ID, which can't be turned into coordinates without Google's paid API. |
 | Short share link (phone) | `maps.app.goo.gl/AbC123` | The server follows the redirect to get the full URL, then parses it as above. |
-| Search-style URL | `google.com/maps?q=Blue+Bottle+Seongsu` or `?q=37.54,127.05` | Coordinates if they are in `q`. Otherwise the name is searched with Nominatim. |
+| Search-style URL | `google.com/maps?q=Blue+Bottle+Seongsu` or `?q=37.54,127.05` | Coordinates if they are in `q`. Otherwise the name is searched with Kakao keyword search. |
 | Pasted share text | `Blue Bottle Seongsu\nhttps://maps.app.goo.gl/...` | The text before the link is used as a name hint. |
 
-- **Order the app tries:** `!3d!4d`, then the `!20s` Plus Code, then `?q=` coordinates, then `@lat,lng`, then a name search on Nominatim.
-- **Address:** a Google link has no address in it, so we get one by **reverse-geocoding** the coordinates with Nominatim. It is free, but the OSM address wording can differ a little from Google's.
+- **Order the app tries:** `!3d!4d`, then the `!20s` Plus Code, then `?q=` coordinates, then `@lat,lng`, then a name search on Kakao.
+- **Address:** a Google link has no address in it, so we get the 도로명 and 지번 addresses from the coordinates with Kakao `coord2address`.
 - **Altitude** is not in the links. We get **latitude and longitude**.
 - **If parsing fails:** fall back to the search box and a map pin. You can always drag the pin to fix it.
 - We only read the **URL** and never scrape Google's page content.
 - **Phone shortcut:** as an installed PWA on **Android**, the app can appear in Google Maps' "Share" menu (Web Share Target), which opens the Add form pre-filled. **iOS** doesn't allow this for web apps, so on iPhone it is copy then paste. The form auto-reads the clipboard when you tap "Paste link".
+
+### Naver / Kakao share text and plain addresses
+- Naver links (`naver.me`) and Kakao links (`kko.kakao.com`) usually carry only a place ID, and we don't scrape their pages.
+- Their app **share text** usually includes the name and address. We take those lines and look them up with Kakao (address search, plus keyword search for the name) to get the exact pin.
+- A typed or pasted **도로명주소 / 지번주소** goes through Kakao address search, which pins the building.
+- **Fallback:** search box, then drop or drag the pin on the map.
+
+## 8. Setup you'll do (when we get there)
+1. Create a **Supabase** project and copy its URL and anon key, plus the service-role key for the server only.
+2. Create a **Kakao Developers** app and copy its **REST API key**. It is used only on the server and is never shipped to the phone.
+3. Create a **Vercel** project from this repo and add the keys as environment variables.
