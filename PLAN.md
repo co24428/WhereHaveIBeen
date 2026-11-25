@@ -208,6 +208,24 @@ Paste a link into the Add form. The server parses it and pre-fills the form, and
 - Naver links (`naver.me`) and Kakao links (`kko.kakao.com`) usually carry only a place ID, and we don't scrape their pages.
 - Their app **share text** usually includes the name and address. We take those lines and look them up with Kakao (address search, plus keyword search for the name) to get the exact pin.
 - A typed or pasted **도로명주소 / 지번주소** goes through Kakao address search, which pins the building.
+#### Real Kakao sample (two forms)
+```
+A) [카카오맵] 멘부쿠제면소 https://kko.to/Iqc4jhs73Q
+B) 경기 의왕시 이미로 40 (포일동)
+```
+You can paste A, B, or both. Parsing:
+| Piece | Rule | Result |
+|---|---|---|
+| Source | starts with `[카카오맵]` (or `[네이버 지도]`) | kakao |
+| Name | text between the prefix and the URL | `멘부쿠제면소` |
+| Link | `kko.to/…` or `kko.kakao.com/…`. The server reads only the redirect target, never the page | place ID from `place.map.kakao.com/<id>` |
+| Address | a line that starts with a 시/도 name and contains `…로/길 + number`. The `(포일동)` part is removed before searching | `경기 의왕시 이미로 40` |
+
+How the coordinates are found (Kakao Local API):
+1. **Address present:** run address search to get the building's exact coordinates and the 도로명/지번 addresses. Then run keyword search for the name near those coordinates (within 100 m) to get the category and Kakao place ID.
+2. **Only name + link:** run keyword search for the name, and pick the result whose **ID matches the link's place ID**, which gives an exact match. If the link can't be resolved, show the top results to pick from.
+3. **Only address:** run address search, then type a nickname yourself.
+
 - **Fallback:** search box, then drop or drag the pin on the map.
 
 ## 8. Setup you'll do (when we get there)
